@@ -1,0 +1,79 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <title></title>
+    <script src="jquery.js"></script>
+    <script src="bomberman.js"></script>
+</head>
+<body>
+    <div id="div_cvs">
+        <canvas id="cvs" width="680" height="520" style="border:2px solid black;"></canvas>
+    </div>
+    <p id="direction"></p>
+    <script>
+	
+		// Global variables
+	
+        var c = document.getElementById('cvs');
+        var ctx = c.getContext('2d');
+        var timer = new Timer();
+        timer.interval = 10;
+        timer.isLoop = true;
+        var direction = {
+            up: 0,
+            right: 1,
+            down: 2,
+            left: 3,
+            upright: 4,
+            downright: 5,
+            downleft: 6,
+            upleft: 7
+        };
+        var blockType = {
+            type_empty: 0,
+            type_wall: 1,
+            type_crate: 2
+        };
+        var blockSize = 40;
+        var playerSize = 20;
+        var mapWidth = document.getElementById('cvs').width / blockSize;
+        var mapHeight = document.getElementById('cvs').height / blockSize;
+        var map = [];
+        var players = [];
+		
+        (function () {
+
+			// Call to external script. file bomberman.js and jquery.js should be in same folder as new.html
+		
+            callExternalScript();
+            makeMap();
+			
+			// Create players
+			
+            players.push(new Player(1, 1, 1));
+            players.push(new Player(15, 11, 2));
+
+			// Gameloop
+			
+            timer.tick = function () {
+
+                drawGame();
+
+                for (var i = 0; i < players.length; i++) {
+                    setDirection(players[i]);
+                    movePlayer(players[i]);
+                }
+                
+            }
+
+			// Start the gameloop
+			
+            timer.start();
+
+        })();
+		
+    </script>
+</body>
+</html>

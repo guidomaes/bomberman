@@ -1,0 +1,1122 @@
+﻿<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+
+	<script src="jquery.js"></script>
+	
+    <title>Bomberman</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+</head>
+<body style="background-color: black;">
+
+    <div id="DIV_cvs">
+        <canvas id="cvs" width="680" height="520"></canvas>
+    </div>
+
+    
+    <p id="demo" style="color: white;"></p>
+
+    <script>
+
+        var c = document.getElementById('cvs');
+        var ctx = c.getContext('2d');
+        ctx.font = "25px Arial";
+        var controlsInfo = "Press enter to start / pause the game";
+        var displayText = controlsInfo;
+        var timer = new Timer();
+        timer.interval = 10;
+        timer.isLoop = true;
+        var blockSize = 40;
+        var playerSize = 20;
+        var explosionTime = 2500;
+        var onFireTime = 1500;
+        var immuneAfterDamageTime = 3000;
+        var initialExplosionRange = 2;
+        var initialAmountOfBasicBombs = 1;
+        var initialPlayerSpeed = 1;
+        var maximumPlayerSpeed = 4;
+        var initialPlayerHealth = 3;
+        var blockType = {
+            type_empty: 0,
+            type_wall: 1,
+            type_crate: 2
+        };
+        var bombType = {
+            type_basic: 0,
+            type_mine: 1
+        };
+        var itemType = {
+            type_increaseAmountOfBasicBombs: 0,
+            type_increaseExplosionRange: 1,
+            type_increasePlayerSpeed: 2,
+            type_increaseHealth: 3,
+            type_increaseAmountOfMines: 4
+        };
+        var mapWidth = document.getElementById('cvs').width / blockSize;
+        var mapHeight = document.getElementById('cvs').height / blockSize;
+        var map = [];
+        var direction = {
+            up: 0,
+            right: 1,
+            down: 2,
+            left: 3
+        };
+        var spawnPoints = [
+            {
+                x: 1,
+                y: 1
+            },
+            {
+                x: 15,
+                y: 11
+            },
+            {
+                x: 1,
+                y: 11
+            },
+            {
+                x: 15,
+                y: 1
+            }
+        ];
+        var reservedBlocks = [];
+        var reservedBlocksInEachDirectionFromSpawnPoints = 2;
+        var chanceOfItemDroppingPercentage = 1;
+        var cratesPercentage = 0.7;
+        var players = [
+            new Player(spawnPoints[0].x, spawnPoints[0].y, 1, 'blue'),
+            new Player(spawnPoints[1].x, spawnPoints[1].y, 2, 'yellow')
+        ];
+        var amountOfAlivePlayers = players.length;
+
+        function makeMap() {
+
+            for (var i = 0, x = 0, y = 0; i < mapWidth * mapHeight; i++) {
+
+                if (x === mapWidth) {
+                    x = 0;
+                    y++;
+                }
+
+                if (x === 0 || y === 0 || x === mapWidth - 1 || y === mapHeight - 1 || x % 2 === 0 && y % 2 === 0) {
+                    map.push(new Block(x, y, 1));
+                }
+
+                else {
+                    map.push(new Block(x, y, 0));
+                }
+
+                x++;
+            }
+
+        }
+
+        function addReservedBlocks() {
+
+            //Loop through spawnpoints
+            for (var i = 0; i < spawnPoints.length; i++) {
+
+                //Add spawnpoints to reservedBlocks[]
+                reservedBlocks.push({
+                    x: spawnPoints[i].x,
+                    y: spawnPoints[i].y
+                });
+
+                var surroundings = returnSurroundings(spawnPoints[i].x, spawnPoints[i].y, reservedBlocksInEachDirectionFromSpawnPoints);
+
+                for (var j = 0; j < surroundings.directions.length; j++) {
+
+                    for (var k = 0; k < reservedBlocksInEachDirectionFromSpawnPoints; k++) {
+
+                        if (surroundings.directions[j][k] != null) {
+
+                            reservedBlocks.push({
+                                x: surroundings.directions[j][k].mapPos.x,
+                                y: surroundings.directions[j][k].mapPos.y
+                            });
+
+                        }
+                        
+                    }
+
+                }
+
+            }
+
+        }
+
+        function returnBlock(posX, posY) {
+
+            for (var i = 0; i < map.length; i++) {
+
+                if(posX === map[i].mapPos.x && posY === map[i].mapPos.y) {
+
+                    return map[i];
+                    break;
+
+                }
+
+            }
+
+        }
+
+        function returnSurroundings(posX, posY, range) {
+
+            var surroundings = {
+
+                range: range,
+                center: returnBlock(posX, posY),
+                directions: [
+                    [],
+                    [],
+                    [],
+                    []
+                ]
+
+            };
+
+            for (var i = 0, d = 0, r = 1; i < 4 * range; i++) {
+
+                if(i != 0 && i % range === 0) {
+                    d++;
+                }
+                if (r === range + 1) {
+                    r = 1;
+                }
+                switch(d) {
+                    case 0: {
+                        surroundings.directions[d].push(returnBlock(surroundings.center.mapPos.x, surroundings.center.mapPos.y - r));
+                    } break;
+                    case 1: {
+                        surroundings.directions[d].push(returnBlock(surroundings.center.mapPos.x + r, surroundings.center.mapPos.y));
+                    } break;
+                    case 2: {
+                        surroundings.directions[d].push(returnBlock(surroundings.center.mapPos.x, surroundings.center.mapPos.y + r));
+                    } break;
+                    case 3: {
+                        surroundings.directions[d].push(returnBlock(surroundings.center.mapPos.x - r, surroundings.center.mapPos.y));
+                    } break;
+                }
+                r++;
+
+            };
+
+            return surroundings;
+
+        }
+
+        function updatePlayerSurroundings(player) {
+            
+            var surroundings = returnSurroundings(player.mapPos.x, player.mapPos.y, 1);
+
+            player.surroundings.up = surroundings.directions[0][0];
+            player.surroundings.right = surroundings.directions[1][0];
+            player.surroundings.down = surroundings.directions[2][0];
+            player.surroundings.left = surroundings.directions[3][0];
+
+        }
+
+        function generateCrates() {
+
+            for (var i = 0; i < map.length; i++) {
+
+                if (map[i].blockType.blockType === blockType.type_empty) {
+
+                    var isReserved = false;
+                    for (var j = 0; j < reservedBlocks.length; j++) {
+
+                        if (map[i].mapPos.x === reservedBlocks[j].x && map[i].mapPos.y === reservedBlocks[j].y) {
+
+                            isReserved = true;
+                            break;
+
+                        }
+
+                    }
+
+                    if (!isReserved) {
+
+                        if (Math.random() < cratesPercentage) {
+
+                            map[i] = new Block(map[i].mapPos.x, map[i].mapPos.y, 2);
+
+                        }
+
+                    }
+
+                }
+
+            }
+
+        }
+
+        function checkCollision(obj1, obj2) {
+
+            if (obj1.canvasPos.x < obj2.canvasPos.x + obj2.size.width &&
+                obj1.canvasPos.x + obj1.size.width > obj2.canvasPos.x &&
+                obj1.canvasPos.y < obj2.canvasPos.y + obj2.size.height &&
+                obj1.size.height + obj1.canvasPos.y > obj2.canvasPos.y) {
+
+                return true;
+
+            }
+            else {
+                return false;
+            }
+
+        }
+		
+		function drawGame() {
+			
+			ctx.clearRect(0, 0, c.width, c.height);
+			drawMap();
+			drawPlayers();
+			drawDisplayText();
+		}
+
+        function drawMap() {
+
+            for (var i = 0; i < map.length; i++) {
+
+                if (map[i].blockType.blockType === blockType.type_wall) {
+
+                    ctx.fillStyle = "black";
+
+                }
+                else if (map[i].blockType.blockType === blockType.type_empty) {
+
+                    if (map[i].onFire === true) {
+
+                        ctx.fillStyle = "orange";
+
+                    } else if (map[i].hasBomb) {
+
+                        ctx.fillStyle = "red";
+
+                    } else if (map[i].item) {
+                        
+                        ctx.fillStyle = map[i].item.color;
+
+                    } else {
+
+                        ctx.fillStyle = "green";
+
+                    }
+
+                }
+                else if (map[i].blockType.blockType === blockType.type_crate) {
+
+                    ctx.fillStyle = "brown";
+
+                }
+
+                ctx.fillRect(map[i].mapPos.x * blockSize, map[i].mapPos.y * blockSize, blockSize, blockSize);
+
+            }
+
+        }
+        
+        function drawPlayers() {
+            
+            for (var i = 0; i < players.length; i++) {
+
+                if (!players[i].isDead) {
+                    ctx.fillStyle = players[i].color;
+                    ctx.fillRect(players[i].canvasPos.x, players[i].canvasPos.y, players[i].size.width, players[i].size.height);
+                    ctx.fillStyle = 'black';
+                }
+
+            }
+
+        }
+
+        function drawDisplayText() {
+            ctx.fillStyle = "white";
+            ctx.fillText(displayText, c.width / 2 - ctx.measureText(displayText).width / 2, c.height / 2);
+            ctx.fillStyle = 'black';
+        }
+
+        function newGame() {
+
+            makeMap();
+            addReservedBlocks();
+            generateCrates();
+            drawGame();
+
+        }
+
+        function movePlayer(player) {
+
+            var mapPosX = player.mapPos.x;
+            var mapPosY = player.mapPos.y;
+
+            var diffX = 0;
+            var diffY = 0;
+
+            if (player.rightKeyDown === true && player.leftKeyDown === false) {
+                player.canvasPos.x = player.canvasPos.x + player.speed;
+                diffX = diffX + player.speed;
+            }
+            else if (player.rightKeyDown === false && player.leftKeyDown === true) {
+                player.canvasPos.x = player.canvasPos.x - player.speed;
+                diffX = diffX - player.speed;
+            }
+
+            if (player.upKeyDown === true && player.downKeyDown === false) {
+                player.canvasPos.y = player.canvasPos.y - player.speed;
+                diffY = diffY - player.speed;
+            }
+            else if (player.upKeyDown === false && player.downKeyDown === true) {
+                player.canvasPos.y = player.canvasPos.y + player.speed;
+                diffY = diffY + player.speed;
+            }
+
+            for (var i = 0; i < map.length; i++) {
+
+                if (!map[i].walkThrough) {
+
+                    if (checkCollision(player, map[i])) {
+                        
+                        for (var j = 0; j < player.speed; j++) {
+                            
+                            if (diffX !== 0) {
+
+                                if(diffX > 0){
+                                    player.canvasPos.x--;
+                                    diffX--;
+                                } else {
+                                    player.canvasPos.x++;
+                                    diffX++;
+                                }
+
+                            }
+                            if (diffY !== 0) {
+                                
+                                if(diffY > 0){
+                                    player.canvasPos.y--;
+                                    diffY--;
+                                } else {
+                                    player.canvasPos.y++;
+                                    diffY++;
+                                }
+
+                            }
+
+                            if (!checkCollision(player, map[i])) {
+                                break;
+                            }
+
+                        }
+
+                    }
+
+                } else if (map[i].blockType.blockType === blockType.type_empty) {
+
+                    player.mapPos.x = Math.floor(player.canvasPos.x / blockSize);
+                    player.mapPos.y = Math.floor(player.canvasPos.y / blockSize);
+                    continue;
+
+                }
+
+            }
+
+        }
+
+        function isValidPlaceToLayBomb(x, y) {
+
+            var isValid = true;
+            var block = returnBlock(x, y);
+            
+            if (block.hasBomb === true || block.onFire === true) {
+            
+                isValid = false;
+
+            }
+
+            return isValid;
+        }
+
+        function pickUpItem(player, item) {
+
+            if (!player.isDead && item != null) {
+            
+                switch (item.type) {
+
+                    case 0: {
+                        player.amountOfBasicBombs++;
+                    } break;
+
+                    case 1: {
+                        player.explosionRange++;
+                    } break;
+
+                    case 2: {
+                        if (player.speed < maximumPlayerSpeed) {
+                            player.speed++;
+                        }
+                    } break;
+                    case 3: {
+                        player.health++;
+                    } break;
+                    case 4: {
+                        player.amountOfMines++;
+                    } break;
+
+                }
+
+                returnBlock(item.mapPos.x, item.mapPos.y).item = null;
+
+            }
+
+        }
+
+        function checkIfAnyPlayerTouchesItem() {
+
+            for (var i = 0; i < players.length; i++) {
+
+                if (!players[i].isDead) {
+
+                    for (var j = 0; j < map.length; j++) {
+
+                        if (map[j].item) {
+
+                            if (checkCollision(players[i], map[j])) {
+
+                                pickUpItem(players[i], map[j].item);
+
+                            }
+
+                        }
+
+                    }
+
+                }
+
+            }
+
+        }
+
+        function checkIfAnyPlayerTouchesFire() {
+            
+            var playersWhoTouchFire = [];
+
+            for (var i = 0; i < players.length; i++) {
+
+                if (!players[i].isDead) {
+                
+                    for (var j = 0; j < map.length; j++) {
+
+                        if (map[j].onFire) {
+
+                            if (checkCollision(players[i], map[j])) {
+
+                                playersWhoTouchFire.push(players[i]);
+
+                            }
+
+                        }
+
+                    }
+
+                }
+
+            }
+
+            return playersWhoTouchFire;
+
+        }
+
+        function checkIfSomebodyWon() {
+            
+            if (amountOfAlivePlayers < 2) {
+
+                var winner = null;
+
+                for (var i = 0; i < players.length; i++) {
+
+                    if (!players[i].isDead) {
+
+                        winner = players[i];
+                        displayText = "Player " + players[i].id + " won!";
+                        break;
+
+                    }
+
+                }
+
+                if (winner === null) {
+                    displayText = "Tie!";
+                }
+
+            }
+
+        }
+
+        function damagePlayer(player) {
+
+            if (player != null) {
+
+                if (!player.isImmune) {
+
+                    player.health = player.health - 1;
+
+                    if (player.health < 1) {
+
+                        player.die();
+
+                    } else {
+
+                        player.isImmune = true;
+                        var oldColor = player.color;
+                        player.color = "purple";
+
+                        setTimeout(function () {
+                            player.isImmune = false;
+                            player.color = oldColor;
+                        }, immuneAfterDamageTime);
+                        
+                    }
+
+                } 
+
+            }
+
+        }
+
+        function updatePlayerHasKeyDown() {
+
+            for (var i = 0; i < players.length; i++) {
+
+                if (players[i].rightKeyDown === true || players[i].leftKeyDown === true || players[i].upKeyDown === true || players[i].downKeyDown === true) {
+                    players[i].hasKeyDown = true;
+                }
+                else {
+                    players[i].hasKeyDown = false;
+                }
+
+            }
+
+        }
+
+        newGame();
+
+        timer.tick = function () {
+
+            updatePlayerHasKeyDown();
+
+            var playersWhoTouchFire = checkIfAnyPlayerTouchesFire();
+
+            if (playersWhoTouchFire.length > 0) {
+
+                for (var j = 0; j < playersWhoTouchFire.length; j++) {
+
+                    damagePlayer(playersWhoTouchFire[j]);
+
+                }
+
+            }
+
+            checkIfAnyPlayerTouchesItem();
+
+            for (var i = 0; i < players.length; i++) {
+
+                if (!players[i].isDead) {
+
+                    var block = returnBlock(players[i].mapPos.x, players[i].mapPos.y);
+
+                    if (players[i].hasKeyDown) {
+                        movePlayer(players[i]);
+                        updatePlayerSurroundings(players[i]);
+                    }
+                    
+                    if (block.hasBomb) {
+                        
+                        if (!checkCollision(players[i], block)) {
+                            block.walkThrough = false;
+                            //console.log(block);
+                        }
+                    }
+                    
+                }
+                
+            }
+
+            drawGame();
+
+        };
+
+        $(document).keydown(function (e) {
+
+            switch (e.keyCode) {
+
+/*ENTER*/           case 13: {
+                        if (timer.stopped) {
+                            timer.start();
+                            displayText = "";
+                        } else {
+                            displayText = controlsInfo;
+                            drawDisplayText();
+                            timer.stop();
+                        }
+                    } break;
+
+/*Player 1*/
+
+/*W*/               case 87: {
+                        players[0].upKeyDown = true;
+                    } break;
+
+/*D*/               case 68: {
+                        players[0].rightKeyDown = true;
+                    } break;
+
+/*S*/               case 83: {
+                    players[0].downKeyDown = true;
+                    } break;
+
+/*A*/               case 65: {
+                        players[0].leftKeyDown = true;
+                    } break;
+/*SPACE*/           case 32: {
+                        if (!timer.stopped && !players[0].isDead) {
+
+                            if (players[0].amountOfBasicBombs > 0) {
+
+                                var block = returnBlock(players[0].mapPos.x, players[0].mapPos.y);
+
+                                if (isValidPlaceToLayBomb(block.mapPos.x, block.mapPos.y)) {
+
+                                    players[0].amountOfBasicBombs = players[0].amountOfBasicBombs - 1;
+                                    players[0].dropBomb(block, players[0].equippedBomb, players[0]);
+
+                                }
+
+                            } 
+
+                        }
+                    } break;
+
+/*Player 2*/
+
+/*UP*/              case 38: {
+                        players[1].upKeyDown = true;
+                    } break;
+
+/*RIGHT*/           case 39: {
+                        players[1].rightKeyDown = true;
+                    } break;
+
+/*DOWN*/            case 40: {
+                        players[1].downKeyDown = true;
+                    } break;
+
+/*LEFT*/            case 37: {
+                        players[1].leftKeyDown = true;
+                    } break;
+/*BACK SLASH*/      case 220: {
+                        if (!timer.stopped && !players[1].isDead) {
+
+                            if (players[1].amountOfBasicBombs > 0) {
+
+                                var block = returnBlock(players[1].mapPos.x, players[1].mapPos.y);
+
+                                if (isValidPlaceToLayBomb(block.mapPos.x, block.mapPos.y)) {
+
+                                    players[1].amountOfBasicBombs = players[1].amountOfBasicBombs - 1;
+                                    players[1].dropBomb(block, players[1].equippedBomb, players[1]);
+
+                                }
+
+                            }
+                                
+                        }
+                    } break;
+
+            }
+
+        });
+
+        $(document).keyup(function (e) {
+
+            switch (e.keyCode) {
+
+/*Player 1*/
+
+/*W*/           case 87: {
+                    players[0].upKeyDown = false;
+                } break;
+
+/*D*/           case 68: {
+                    players[0].rightKeyDown = false;
+                } break;
+
+/*S*/           case 83: {
+                    players[0].downKeyDown = false;
+                } break;
+
+/*A*/           case 65: {
+                    players[0].leftKeyDown = false;
+                } break;
+
+/*Player 2*/
+
+/*UP*/          case 38: {
+                    players[1].upKeyDown = false;
+                } break;
+
+/*RIGHT*/       case 39: {
+                    players[1].rightKeyDown = false;
+                } break;
+
+/*DOWN*/        case 40: {
+                    players[1].downKeyDown = false;
+                } break;
+
+/*LEFT*/        case 37: {
+                    players[1].leftKeyDown = false;
+                } break;
+
+            }
+
+        });
+
+        function explode(block, bombType, player) {
+
+            if (block != null && block.blockType.blockType === 0) {
+
+                block.hasBomb = false;
+                block.bomb = null;
+                block.walkThrough = true;
+                player.amountOfBasicBombs = player.amountOfBasicBombs + 1;
+
+                var explosionRadius = returnSurroundings(block.mapPos.x, block.mapPos.y, player.explosionRange);
+
+                var blocksThatCatchFire = [];
+                blocksThatCatchFire.push(explosionRadius.center);
+
+                for (var i = 0; i < explosionRadius.directions.length; i++) {
+
+                    for (var j = 0; j < explosionRadius.directions[i].length; j++) {
+
+                        if (explosionRadius.directions[i][j] != null) {
+
+                            if (explosionRadius.directions[i][j].blockType.blockType === blockType.type_empty) {
+
+                                blocksThatCatchFire.push(explosionRadius.directions[i][j]);
+
+                            } else if (explosionRadius.directions[i][j].blockType.blockType === blockType.type_wall) {
+
+                                break;
+
+                            } else if (explosionRadius.directions[i][j].blockType.blockType === blockType.type_crate) {
+
+                                blocksThatCatchFire.push(explosionRadius.directions[i][j]);
+                                break;
+
+                            }
+
+                        }
+
+                    }
+
+                }
+
+                for (var i = 0; i < blocksThatCatchFire.length; i++) {
+
+                    switch (blocksThatCatchFire[i].blockType.blockType) {
+
+                        case blockType.type_empty: {
+
+                            if (blocksThatCatchFire[i].hasBomb) {
+                                blocksThatCatchFire[i].bomb.explode(blocksThatCatchFire[i], blocksThatCatchFire[i].bomb.type, player);
+                            }
+
+                            blocksThatCatchFire[i].catchOnFire(blocksThatCatchFire[i].mapPos.x, blocksThatCatchFire[i].mapPos.y, player);
+
+                        } break;
+                        case blockType.type_crate: {
+
+                            destroyCrate(blocksThatCatchFire[i]);
+                            blocksThatCatchFire[i].catchOnFire(blocksThatCatchFire[i].mapPos.x, blocksThatCatchFire[i].mapPos.y, player);
+
+                        } break;
+
+                    }
+
+                }
+
+            }
+
+        }
+
+        function catchOnFire(x, y, player) {
+
+            var thisBlock = returnBlock(x, y);
+
+            if (thisBlock != null) {
+            
+                if (thisBlock.onFire) {
+
+                    clearTimeout(thisBlock.letFireDieTimer.timeout);
+                    thisBlock.letFireDieTimer.start();
+
+                } else {
+
+                    if (!thisBlock.letFireDieTimer) {
+                        thisBlock.letFireDieTimer = new Timer();
+                    }
+                    thisBlock.letFireDieTimer.interval = onFireTime;
+                    thisBlock.letFireDieTimer.tick = function () {
+                        thisBlock.onFire = false;
+                    }
+                    thisBlock.onFire = true;
+                    thisBlock.letFireDieTimer.start();
+
+                }
+
+            }
+
+        }
+
+        function destroyCrate(crateBlock) {
+
+            if (crateBlock != null && crateBlock.blockType.blockType === 2) {
+                
+                crateBlock.blockType.blockType = 0;
+                crateBlock.walkThrough = true;
+                crateBlock.hasBomb = false;
+                crateBlock.bomb = null;
+                crateBlock.onFire = false;
+                crateBlock.letFireDieTimer = new Timer();
+                crateBlock.catchOnFire = catchOnFire;
+
+                if (Math.random() < chanceOfItemDroppingPercentage) {
+                    
+                    var amountOfDifferentItems = 0;
+                    var type = 0;
+                    for (var n in itemType) {
+                        amountOfDifferentItems = amountOfDifferentItems + 1;
+                    }
+                    type = Math.floor(Math.random() * amountOfDifferentItems);
+                    var color = "";
+                    if (type === 0) {
+                        color = "LimeGreen";
+                    } else if (type === 1) {
+                        color = "SteelBlue";
+                    } else if (type === 2) {
+                        color = "YellowGreen";
+                    } else if (type === 3) {
+                        color = "pink";
+                    } else if (type === 4) {
+                        color = "lime";
+                    }
+                    crateBlock.item = new Item(crateBlock.mapPos.x, crateBlock.mapPos.y, type, color);
+
+                }
+
+            } else {
+                console.log("Block (" + crateBlock.mapPos.x + ", " + crateBlock.mapPos.y + ") is not of type crate");
+            }
+
+        }
+		
+		function DestroyAllCrates() 
+		{
+			for (var i = 0; i < map.length; i++) {
+				if (map[i].blockType.blockType === 2) {
+					map[i].blockType.blockType = 0;
+					map[i].walkThrough = true;
+				}
+			}
+			
+			drawMap();
+			drawPlayers();
+		}
+
+        function Block(mapPosX, mapPosY, blockType) {
+
+            this.mapPos = {
+                x: mapPosX,
+                y: mapPosY
+            },
+            this.canvasPos = {
+                x: Math.floor(mapPosX * blockSize),
+                y: Math.floor(mapPosY * blockSize)
+            },
+            this.size = {
+                width: blockSize,
+                height: blockSize
+            },
+            this.blockType = {
+                blockType: blockType
+            },
+            this.walkThrough = (blockType === 0 ? true : false),
+            this.hasBomb = (blockType === 0 ? false : undefined),
+            this.bomb = (blockType === 0 ? null : undefined),
+            this.onFire = (blockType === 0 ? false : undefined),
+            this.letFireDieTimer = (blockType === 0 ? new Timer() : undefined),
+            this.catchOnFire = (blockType === 0 ? catchOnFire : undefined),
+            this.item = (blockType === 0 ? null : undefined)
+
+        }
+
+        function Player(x, y, id, color) {
+
+            var self = this;
+            this.mapPos = {
+                x: x,
+                y: y
+            },
+            this.canvasPos = {
+                x: Math.floor(x * blockSize) + blockSize / 4,
+                y: Math.floor(y * blockSize) + blockSize / 4
+            },
+            this.size = {
+                width: playerSize,
+                height: playerSize
+            },
+            this.hasKeyDown = false,
+            this.upKeyDown = false,
+            this.rightKeyDown = false,
+            this.downKeyDown = false,
+            this.leftKeyDown = false,
+            this.surroundings = {
+                upLeft: null,
+                up: null,
+                upRight: null,
+                left: null,
+                right: null,
+                downLeft: null,
+                down: null,
+                downRight: null
+            },
+            this.id = id,
+            this.color = color,
+            this.speed = initialPlayerSpeed,
+            this.isDead = false;
+            this.isImmune = false;
+            this.health = initialPlayerHealth;
+            this.amountOfBasicBombs = initialAmountOfBasicBombs,
+            this.amountOfMines = 0;
+            this.explosionRange = initialExplosionRange,
+            this.equippedBomb = bombType.type_basic,
+
+            this.switchEquippedBomb = function () {
+
+            },
+
+            this.dropBomb = function(block, bombType, player) {
+                
+                block.bomb = new Bomb(block.mapPos.x, block.mapPos.y, bombType, self);
+                block.hasBomb = true;
+                
+                setTimeout(function () {
+                    if (block.bomb != null) {
+                        block.bomb.explode(block, bombType, self);
+                    }
+                }, explosionTime);
+                
+            },
+
+            this.die = function () {
+
+                this.isDead = true;
+                this.mapPos = null;
+                this.canvasPos = null;
+                this.surroundings = null;
+                amountOfAlivePlayers = amountOfAlivePlayers - 1;
+
+                checkIfSomebodyWon();
+
+            }
+
+        }
+
+        function Bomb(mapPosX, mapPosY, bombType, player) {
+
+            this.player = player,
+            this.type = bombType,
+            this.mapPos = {
+                x: mapPosX,
+                y: mapPosY
+            },
+            this.canvasPos = {
+                x: Math.floor(mapPosX * blockSize),
+                y: Math.floor(mapPosY * blockSize)
+            },
+            this.size = {
+                width: blockSize,
+                height: blockSize
+            },
+            this.damage = 1,
+            this.explode = explode
+
+        }
+
+        function Item(mapPosX, mapPosY, type, color) {
+
+            this.type = type,
+            this.color = color,
+            this.mapPos = {
+                x: mapPosX,
+                y: mapPosY
+            },
+            this.canvasPos = {
+                x: Math.floor(mapPosX * blockSize),
+                y: Math.floor(mapPosY * blockSize)
+            },
+            this.size = {
+                width: blockSize,
+                height: blockSize
+            }
+
+        }
+
+        function Timer() {
+
+            this.interval = 0;
+            this.stopped = true;
+            this.timeout;
+            this.timeStarted;
+            this.isLoop = false;
+            this.tick = function () { }
+            this.ticki = function () {
+
+                if (!self.stopped) {
+
+                    self.tick();
+
+                    if (self.isLoop) {
+                        self.continue();
+                    } else {
+                        self.stopped = true;
+                    }
+
+                }
+
+            }
+            this.start = function () {
+                self.timeStarted = Date.now();
+                self.stopped = false;
+                self.continue();
+            }
+            this.continue = function () {
+                self.timeout = setTimeout(self.ticki, self.interval);
+            }
+            this.stop = function () {
+                self.stopped = true;
+            }
+            this.add = function (now, time) {
+                var newTime = self.interval - (now - self.timeStarted) + time;
+                clearTimeout(self.timeout);
+                self.timeout = setTimeout(self.ticki, newTime);
+            }
+            var self = this;
+
+        }
+
+    </script>
+</body>
+</html>
